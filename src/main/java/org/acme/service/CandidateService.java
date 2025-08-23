@@ -2,47 +2,56 @@ package org.acme.service;
 
 import org.acme.domain.dto.CandidateDTO;
 import org.acme.domain.entity.Candidate;
+import org.acme.repository.CandidateRepository;
 
+import io.quarkus.logging.Log;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
 import jakarta.transaction.Transactional;
 import java.util.List;
+import java.util.UUID;
 
 @ApplicationScoped
 public class CandidateService {
+
+    @Inject
+    CandidateRepository candidateRepository;
 
     /**
      * Cria um novo candidato
      */
     @Transactional
-    public Candidate createCandidate(CandidateDTO candidateDTO) {
-        Candidate candidate = new Candidate();
-        candidate.fullName = candidateDTO.name();
-        candidate.email = candidateDTO.email();
-        // Persistir no banco
-        candidate.persist();
-        return candidate;
+    public void createCandidate(CandidateDTO candidateDTO) {
+        try {
+            Candidate candidate = new Candidate();
+            candidate.fullName = candidateDTO.name();
+            candidate.email = candidateDTO.email();
+            candidateRepository.persist(candidate);
+        } catch (Exception e) {
+            Log.error("Error creating candidate", e);
+        }
     }
 
     /**
      * Retorna todos os candidatos
      */
     public List<Candidate> getAllCandidates() {
-        return Candidate.listAll(); // Assuming Panache Entity
+        return candidateRepository.listAll();
     }
 
     /**
      * Busca um candidato pelo ID
      */
-    public Candidate getCandidateById(Long id) {
-        return Candidate.findById(id);
+    public Candidate getCandidateById(UUID id) {
+        return candidateRepository.findById(id);
     }
 
     /**
      * Atualiza um candidato existente
      */
     @Transactional
-    public Candidate updateCandidate(Long id, CandidateDTO candidateDTO) {
-        Candidate candidate = Candidate.findById(id);
+    public Candidate updateCandidate(UUID id, CandidateDTO candidateDTO) {
+        Candidate candidate = candidateRepository.findById(id);
         if (candidate == null) {
             return null;
         }
@@ -56,8 +65,8 @@ public class CandidateService {
      * Remove um candidato
      */
     @Transactional
-    public boolean deleteCandidate(Long id) {
-        Candidate candidate = Candidate.findById(id);
+    public boolean deleteCandidate(UUID id) {
+        Candidate candidate = candidateRepository.findById(id);
         if (candidate == null) {
             return false;
         }

@@ -21,9 +21,6 @@ public class Candidate extends PanacheEntityBase {
     @Column(nullable = false, unique = true, length = 255)
     public String email;
 
-    @Column(length = 50)
-    public String phone;
-
     @Column(name = "created_at", nullable = false)
     public LocalDateTime createdAt = LocalDateTime.now();
 

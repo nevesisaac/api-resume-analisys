@@ -11,6 +11,7 @@ import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import java.io.InputStream;
+import java.util.UUID;
 
 @Path("/resume")
 @Produces(MediaType.APPLICATION_JSON)
@@ -43,8 +44,8 @@ public class CurriculumResource {
     @GET
     @Path("/{id}/download")
     @Produces("application/pdf")
-    public Response downloadResume(@PathParam("id") Long resumeId) {
-        InputStream fileStream = curriculumService.getResumeFile(resumeId);
+    public Response downloadCurriculum(@PathParam("id") UUID candidateId) {
+        InputStream fileStream = curriculumService.getCurriculum(candidateId);
         if (fileStream == null) {
             return Response.status(Response.Status.NOT_FOUND).build();
         }
@@ -58,7 +59,7 @@ public class CurriculumResource {
      */
     @DELETE
     @Path("/{id}")
-    public Response deleteResume(@PathParam("id") Long resumeId) {
+    public Response deleteResume(@PathParam("id") UUID resumeId) {
         boolean deleted = curriculumService.deleteResume(resumeId);
         if (!deleted) {
             return Response.status(Response.Status.NOT_FOUND).build();
@@ -71,14 +72,14 @@ public class CurriculumResource {
      */
     @GET
     @Path("/{id}/analysis")
-    public ResumeAnalysisResponse getAnalysisUser(@PathParam("id") Long candidateId) {
+    public ResumeAnalysisResponse getAnalysisUser(@PathParam("id") UUID candidateId) {
         return curriculumService.getResumeAnalysis(candidateId);
     }
 
     /**
      * Busca candidatos por critérios (skills, experiência, score)
      */
-    @POST
+    @GET
     @Path("/search")
     @Consumes(MediaType.APPLICATION_JSON)
     public Response searchCandidates(

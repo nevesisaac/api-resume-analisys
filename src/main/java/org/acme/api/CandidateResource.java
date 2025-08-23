@@ -3,13 +3,14 @@ package org.acme.api;
 import org.acme.domain.dto.CandidateDTO;
 import org.acme.domain.entity.Candidate;
 import org.acme.service.CandidateService;
+import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
 
 import jakarta.inject.Inject;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import java.util.List;
-import java.util.stream.Collectors;
+import java.util.UUID;
 
 @Path("/candidates")
 @Produces(MediaType.APPLICATION_JSON)
@@ -24,10 +25,9 @@ public class CandidateResource {
      */
     @POST
     public Response createCandidate(CandidateDTO candidateDTO) {
-        Candidate candidate = candidateService.createCandidate(candidateDTO);
-        return Response.status(Response.Status.CREATED)
-                .entity(new CandidateDTO(candidate.id, candidate.fullName, candidate.email))
-                .build();
+        candidateService.createCandidate(candidateDTO);
+        return Response.status(Response.Status.CREATED).build();
+
     }
 
     /**
@@ -38,7 +38,7 @@ public class CandidateResource {
         return candidateService.getAllCandidates()
                 .stream()
                 .map(candidate -> new CandidateDTO(candidate.id, candidate.fullName, candidate.email))
-                .collect(Collectors.toList());
+                .toList();
     }
 
     /**
@@ -46,8 +46,10 @@ public class CandidateResource {
      */
     @GET
     @Path("/{id}")
-    public Response getCandidate(@PathParam("id") Long id) {
-        Candidate candidate = candidateService.getCandidateById(id);
+    public Response getCandidate(
+            @Parameter(description = "UUID do candidato", required = true, example = "123e4567-e89b-12d3-a456-426614174000")
+            @PathParam("id") String id) {
+        Candidate candidate = candidateService.getCandidateById(UUID.fromString(id));
         if (candidate == null) {
             return Response.status(Response.Status.NOT_FOUND).build();
         }
@@ -55,25 +57,14 @@ public class CandidateResource {
     }
 
     /**
-     * Atualiza um candidato existente
-     */
-    @PUT
-    @Path("/{id}")
-    public Response updateCandidate(@PathParam("id") Long id, CandidateDTO candidateDTO) {
-        Candidate updatedCandidate = candidateService.updateCandidate(id, candidateDTO);
-        if (updatedCandidate == null) {
-            return Response.status(Response.Status.NOT_FOUND).build();
-        }
-        return Response.ok(new CandidateDTO(updatedCandidate.id, updatedCandidate.fullName, updatedCandidate.email)).build();
-    }
-
-    /**
      * Remove um candidato
      */
     @DELETE
     @Path("/{id}")
-    public Response deleteCandidate(@PathParam("id") Long id) {
-        boolean deleted = candidateService.deleteCandidate(id);
+    public Response deleteCandidate(
+            @Parameter(description = "UUID do candidato", required = true, example = "123e4567-e89b-12d3-a456-426614174000") 
+            @PathParam("id") String id) {
+        boolean deleted = candidateService.deleteCandidate(UUID.fromString(id));
         if (!deleted) {
             return Response.status(Response.Status.NOT_FOUND).build();
         }
