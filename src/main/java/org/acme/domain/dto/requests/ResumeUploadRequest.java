@@ -1,34 +1,14 @@
 package org.acme.domain.dto.requests;
 
-
+import java.io.File;
 import java.util.UUID;
 
-import org.jboss.resteasy.reactive.PartType;
+import org.jboss.resteasy.reactive.RestForm;
+import org.jboss.resteasy.reactive.multipart.FileUpload;
 
-import jakarta.ws.rs.FormParam;
-import jakarta.ws.rs.core.MediaType;
 
-public class ResumeUploadRequest {
-
-    @FormParam("candidateId")
-    private UUID candidateId;
-
-    @FormParam("file")
-    @PartType(MediaType.APPLICATION_OCTET_STREAM)
-    private byte[] file;
-
-    @FormParam("fileName")
-    private String fileName;
-
-    public UUID getCandidateId() {
-        return candidateId;
-    }
-
-    public byte[] getFile() {
-        return file;
-    }
-
-    public String getFileName() {
-        return fileName;
-    }
-}
+public record ResumeUploadRequest(
+    @RestForm UUID candidateId,
+    @RestForm FileUpload file,
+    @RestForm String fileName
+) {}

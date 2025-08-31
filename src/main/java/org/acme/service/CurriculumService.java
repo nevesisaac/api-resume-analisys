@@ -7,13 +7,22 @@ import org.acme.domain.entity.Candidate;
 import org.acme.domain.entity.Resume;
 import org.acme.repository.CandidateRepository;
 import org.acme.repository.ResumeRepository;
-import org.apache.camel.model.ThrowExceptionDefinition;
+import org.acme.service.rabbitmq.ProducerRabbitMQ;
+import org.acme.utils.enums.EducationLevel;
+import org.acme.utils.enums.LocationType;
+import org.acme.utils.enums.Skill;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+
+import io.quarkus.logging.Log;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import jakarta.persistence.criteria.CriteriaBuilder;
 import jakarta.persistence.criteria.Predicate;
+import jakarta.persistence.criteria.Root;
 import jakarta.transaction.Transactional;
-import net.bytebuddy.implementation.bytecode.Throw;
 
 import java.io.InputStream;
 import java.util.ArrayList;
@@ -23,24 +32,29 @@ import java.util.UUID;
 @ApplicationScoped
 public class CurriculumService {
 
+    private static final String CANDIDATE_ID = "candidate.id";
+
     @Inject
     CandidateRepository candidateRepository;
 
     @Inject
     ResumeRepository resumeRepository;
 
+    @Inject
+    ProducerRabbitMQ producerRabbitMQ;
+
     /**
      * Salva o currículo enviado e associa ao candidato
      */
     @Transactional
-    public void saveResume(ResumeUploadRequest curriculumRequest) {
-        // Buscar ou criar candidato
-        Candidate candidate = candidateRepository.find("id", curriculumRequest.getCandidateId()).firstResult();
+    public Resume saveResume(ResumeUploadRequest curriculumRequest) {
+        // Buscar candidato
+        Candidate candidate = candidateRepository.find("id", curriculumRequest.candidateId()).firstResult();
         if (candidate == null) {
             throw new IllegalArgumentException("Candidato não encontrado");
         }
         // Validar arquivo
-        if (curriculumRequest.getFile() == null || curriculumRequest.getFile().length == 0) {
+        if (curriculumRequest.file() == null) {
             throw new IllegalArgumentException("Arquivo não pode ser vazio");
         }
 
@@ -49,12 +63,29 @@ public class CurriculumService {
         // Criar currículo
         Resume resume = new Resume();
         resume.candidate = candidate;
-        resume.fileName = curriculumRequest.getFileName();
+        resume.fileName = curriculumRequest.fileName();
         resume.fileUrl = "url/to/the/uploaded/file"; // Url gerada após armzenamento S3
         resume.uploadedAt = java.time.LocalDateTime.now();
 
         // Persistir currículo
         resumeRepository.persist(resume);
+
+        return resume;
+    }
+
+    public void publishResumeToQueue(Resume resume) {
+        try {
+            producerRabbitMQ.enviarMensagem(resumeToJson(resume));
+        } catch (JsonProcessingException e) {
+            Log.error("Erro ao publicar mensagem no RabbitMQ: " + e.getMessage());
+        }
+    }
+
+    private String resumeToJson(Resume resume) throws JsonProcessingException {
+        ObjectMapper mapper = new ObjectMapper();
+        mapper.registerModule(new JavaTimeModule());
+        mapper.findAndRegisterModules();
+        return mapper.writeValueAsString(resume);
     }
 
     /**
@@ -66,52 +97,89 @@ public class CurriculumService {
         if (candidate == null) {
             throw new IllegalArgumentException("Candidato não encontrado");
         }
-        Resume resume = resumeRepository.find("candidate.id", candidateId).firstResult();
+        Resume resume = resumeRepository.find(CANDIDATE_ID, candidateId).firstResult();
         if (resume == null) {
             throw new IllegalArgumentException("Currículo não encontrado para o candidato");
         }
 
-        // 2. Chamar serviço de IA (simulação)
-        // Exemplo: análise fictícia do currículo
+        // 2. Busca registro no BD
         String analysisSummary = "Resumo da análise do currículo para " + candidate.fullName;
-        double score = 85.0; // Exemplo de score fictício
         Integer experienceYears = 5; // Exemplo de anos de experiência fictício
 
         // 3. Retornar objeto ResumeAnalysisResponse.
-        ResumeAnalysisResponse response = new ResumeAnalysisResponse(candidateId, resume.id, analysisSummary,
-                experienceYears, analysisSummary, score);
-        return response;
+        return new ResumeAnalysisResponse(candidateId, resume.id, analysisSummary,
+                experienceYears, analysisSummary);
     }
 
-    /**
-     * Busca candidatos com base em critérios de seleção
-     */
     public List<Candidate> searchCandidates(CandidateSearchRequest request, int page, int size) {
         var entityManager = candidateRepository.getEntityManager();
         var criteriaBuilder = entityManager.getCriteriaBuilder();
-        var createQuery = criteriaBuilder.createQuery(Candidate.class);
-        var candidate = createQuery.from(Candidate.class);
+        var criteriaQuery = criteriaBuilder.createQuery(Candidate.class);
+        var candidateRoot = criteriaQuery.from(Candidate.class);
 
         List<Predicate> predicates = new ArrayList<>();
 
-        if (request.skills() != null && !request.skills().isEmpty()) {
-            predicates.add(criteriaBuilder.like(candidate.get("skills"), "%" + request.skills() + "%"));
-        }
+        addSkillPredicates(predicates, criteriaBuilder, candidateRoot, request);
+        addEducationPredicate(predicates, criteriaBuilder, candidateRoot, request);
+        addLocationTypePredicate(predicates, criteriaBuilder, candidateRoot, request);
+
+        // Experiência mínima
         if (request.minExperienceYears() != null) {
-            predicates.add(
-                    criteriaBuilder.greaterThanOrEqualTo(candidate.get("experience"), request.minExperienceYears()));
+            predicates.add(criteriaBuilder.greaterThanOrEqualTo(candidateRoot.get("experience"),
+                    request.minExperienceYears()));
         }
+
+        criteriaQuery.select(candidateRoot).where(predicates.toArray(new Predicate[0]));
+
+        var typedQuery = entityManager.createQuery(criteriaQuery);
+        typedQuery.setFirstResult(page * size);
+        typedQuery.setMaxResults(size);
+
+        return typedQuery.getResultList();
+    }
+
+    private void addSkillPredicates(List<Predicate> predicates, CriteriaBuilder criteriaBuilder,
+            Root<Candidate> candidateRoot, CandidateSearchRequest request) {
+        if (request.skills() != null && !request.skills().isEmpty()) {
+            List<String> validSkills = request.skills().values().stream()
+                    .filter(skill -> {
+                        try {
+                            Skill.valueOf(skill);
+                            return true;
+                        } catch (IllegalArgumentException e) {
+                            return false;
+                        }
+                    })
+                    .toList();
+
+            for (String skill : validSkills) {
+                predicates.add(criteriaBuilder.like(candidateRoot.get("skills"), "%" + skill + "%"));
+            }
+        }
+    }
+
+    private void addEducationPredicate(List<Predicate> predicates, CriteriaBuilder criteriaBuilder,
+            Root<Candidate> candidateRoot, CandidateSearchRequest request) {
         if (request.education() != null && !request.education().isEmpty()) {
-            predicates.add(criteriaBuilder.equal(candidate.get("education"), request.education()));
+            try {
+                EducationLevel.valueOf(request.education());
+                predicates.add(criteriaBuilder.equal(candidateRoot.get("education"), request.education()));
+            } catch (IllegalArgumentException e) {
+                // Ignora se não for válido
+            }
         }
+    }
 
-        createQuery.select(candidate).where(predicates.toArray(new Predicate[0]));
-
-        var query = entityManager.createQuery(createQuery);
-        query.setFirstResult(page * size);
-        query.setMaxResults(size);
-
-        return query.getResultList();
+    private void addLocationTypePredicate(List<Predicate> predicates, CriteriaBuilder criteriaBuilder,
+            Root<Candidate> candidateRoot, CandidateSearchRequest request) {
+        if (request.locationType() != null && !request.locationType().isEmpty()) {
+            try {
+                LocationType.valueOf(request.locationType());
+                predicates.add(criteriaBuilder.equal(candidateRoot.get("locationType"), request.locationType()));
+            } catch (IllegalArgumentException e) {
+                // Ignora se não for válido
+            }
+        }
     }
 
     public boolean deleteResume(UUID resumeId) {
@@ -124,7 +192,7 @@ public class CurriculumService {
     }
 
     public InputStream getCurriculum(UUID candidateId) {
-        Resume resume = resumeRepository.find("candidate.id", candidateId).firstResult();
+        Resume resume = resumeRepository.find(CANDIDATE_ID, candidateId).firstResult();
         if (resume == null || resume.fileUrl == null) {
             throw new IllegalArgumentException("Arquivo não encontrado");
         }
@@ -134,6 +202,6 @@ public class CurriculumService {
     }
 
     public Resume getResumeByCandidate(UUID candidateId) {
-        return resumeRepository.find("candidate.id", candidateId).firstResult();
+        return resumeRepository.find(CANDIDATE_ID, candidateId).firstResult();
     }
 }

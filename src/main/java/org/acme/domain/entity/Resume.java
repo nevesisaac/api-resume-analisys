@@ -6,6 +6,8 @@ import jakarta.persistence.*;
 import java.time.LocalDateTime;
 import java.util.UUID;
 
+import com.fasterxml.jackson.annotation.JsonFormat;
+
 @Entity
 @Table(name = "resumes")
 public class Resume extends PanacheEntityBase {
@@ -29,5 +31,6 @@ public class Resume extends PanacheEntityBase {
     public String fileType;
 
     @Column(name = "uploaded_at", nullable = false)
+    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
     public LocalDateTime uploadedAt = LocalDateTime.now();
 }

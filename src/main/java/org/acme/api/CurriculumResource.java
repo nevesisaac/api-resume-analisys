@@ -5,6 +5,7 @@ import org.acme.domain.dto.requests.ResumeUploadRequest;
 import org.acme.domain.dto.responses.ResumeAnalysisResponse;
 import org.acme.domain.entity.Resume;
 import org.acme.service.CurriculumService;
+import org.jboss.resteasy.reactive.MultipartForm;
 
 import jakarta.inject.Inject;
 import jakarta.ws.rs.*;
@@ -26,15 +27,15 @@ public class CurriculumResource {
     @POST
     @Path("/upload")
     @Consumes(MediaType.MULTIPART_FORM_DATA)
-    public Response uploadResume(ResumeUploadRequest curriculumRequest) {
-        // Verifica se candidato já tem currículo
-        Resume existingResume = curriculumService.getResumeByCandidate(curriculumRequest.getCandidateId());
+    public Response uploadResume(@MultipartForm ResumeUploadRequest curriculumRequest) {
+        Resume existingResume = curriculumService.getResumeByCandidate(curriculumRequest.candidateId());
         if (existingResume != null) {
             return Response.status(Response.Status.CONFLICT)
                     .entity("Candidato já possui um currículo.")
                     .build();
         }
-        curriculumService.saveResume(curriculumRequest);
+        Resume savedResume = curriculumService.saveResume(curriculumRequest);
+        curriculumService.publishResumeToQueue(savedResume);
         return Response.accepted().build();
     }
 
@@ -79,7 +80,7 @@ public class CurriculumResource {
     /**
      * Busca candidatos por critérios (skills, experiência, score)
      */
-    @GET
+    @POST
     @Path("/search")
     @Consumes(MediaType.APPLICATION_JSON)
     public Response searchCandidates(

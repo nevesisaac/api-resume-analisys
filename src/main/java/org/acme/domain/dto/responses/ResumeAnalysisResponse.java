@@ -7,6 +7,5 @@ public record ResumeAnalysisResponse(
     UUID candidateId,
     String skills,
     Integer experienceYears,
-    String summary,
-    Double score
+    String summary
 ) {}
